@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HWE — Offline Hazard Early-Warning · v0.3 prototype</title>
+<style>
+  :root { --bg:#0b1220; --panel:#111a2c; --line:#1e2a44; --txt:#dbe6f7; --dim:#8ba0c0; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.45 -apple-system,'Segoe UI',Roboto,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:12px 18px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0; letter-spacing:.3px; }
+  header .tag { color:var(--dim); font-size:12px; }
+  .banner { margin:12px 18px 0; padding:14px 16px; border-radius:10px; background:var(--panel); border:1px solid var(--line); font-size:15px; min-height:52px; display:flex; align-items:center; }
+  .banner.lv-info { border-color:#3b82f6; color:#bfdbfe; }
+  .banner.lv-watch { border-color:#eab308; color:#fde68a; background:#2a2410; }
+  .banner.lv-warn { border-color:#f97316; color:#fed7aa; background:#2c1a0b; }
+  .banner.lv-danger { border-color:#ef4444; color:#fecaca; background:#320d0d; animation:pulse 1s infinite; }
+  .banner.lv-clear { border-color:#22c55e; color:#bbf7d0; }
+  @keyframes pulse { 50% { filter:brightness(1.35); } }
+  .grid { display:grid; grid-template-columns:2.2fr 1fr; gap:14px; padding:14px 18px; }
+  .charts { display:flex; flex-direction:column; gap:12px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .card h3 { margin:0 0 6px; font-size:11px; text-transform:uppercase; letter-spacing:1px; color:var(--dim); }
+  canvas { width:100%; height:130px; display:block; }
+  #chP { height:190px; }
+  .side { display:flex; flex-direction:column; gap:12px; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .stat { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:8px 10px; }
+  .stat .k { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.8px; }
+  .stat .v { font-size:14px; margin-top:2px; }
+  .lvlchip { display:inline-block; padding:3px 12px; border-radius:999px; font-weight:600; border:1px solid var(--line); }
+  .lvlchip.lv-clear{color:#86efac;border-color:#22c55e}.lvlchip.lv-info{color:#93c5fd;border-color:#3b82f6}
+  .lvlchip.lv-watch{color:#fde047;border-color:#eab308}.lvlchip.lv-warn{color:#fdba74;border-color:#f97316}
+  .lvlchip.lv-danger{color:#fca5a5;border-color:#ef4444}
+  .controls { display:flex; flex-direction:column; gap:8px; }
+  .row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  select, button { background:#16233c; color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 10px; font-size:13px; }
+  button:hover { border-color:#3b5a8f; cursor:pointer; }
+  label.sw { display:flex; align-items:center; gap:6px; color:var(--dim); font-size:12px; }
+  .log { max-height:260px; overflow-y:auto; font:12px/1.6 ui-monospace,Menlo,monospace; }
+  .ev { padding:2px 0; border-bottom:1px dashed #16223a; color:var(--dim); }
+  .ev-watch { color:#fde047; } .ev-warn { color:#fdba74; } .ev-danger { color:#fca5a5; font-weight:700; } .ev-info { color:#93c5fd; }
+  footer { padding:10px 18px 22px; color:#5c7093; font-size:11.5px; }
+  .legend { display:flex; gap:14px; font-size:11px; color:var(--dim); margin-top:4px; }
+  .legend i { display:inline-block; width:14px; height:3px; margin-right:4px; vertical-align:middle; border-radius:2px; }
+  #map { height:230px; border-radius:8px; background:#0e1728; }
+  .leaflet-container { font:12px -apple-system,sans-serif; }
+  .poschip { font-size:12px; padding:2px 8px; border-radius:6px; background:#16233c; border:1px solid var(--line); }
+  .poschip.warn { border-color:#eab308; color:#fde047; }
+  .poschip.est { border-color:#8b5cf6; color:#c4b5fd; }
+  .in { width:86px; background:#16233c; color:var(--txt); border:1px solid var(--line); border-radius:7px; padding:6px 8px; font-size:13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Offline Hazard Early-Warning</h1>
+  <span class="tag">v0.3 software prototype · engine: expect-vs-measure · site: Namche Bazaar, Solu Khumbu (grid 3,463 m)</span>
+  <span style="margin-left:auto" class="tag"><span id="clock">—</span> NPT · <span id="scaleLbl">600×</span> · <span id="age">—</span></span>
+</header>
+
+<div id="banner" class="banner lv-none">Booting…</div>
+
+<div class="grid">
+  <div class="charts">
+    <div class="card">
+      <h3>Pressure reduced to sea level — measured vs cached-forecast expectation</h3>
+      <canvas id="chP"></canvas>
+      <div class="legend"><span><i style="background:#7dd3fc"></i>expected (forecast, elevation-corrected)</span><span><i style="background:#fbbf24"></i>measured (GNSS-corrected)</span></div>
+    </div>
+    <div class="card">
+      <h3>Residual (measured − expected) — the anomaly signal</h3>
+      <canvas id="chR"></canvas>
+    </div>
+    <div class="card">
+      <h3>Temperature</h3>
+      <canvas id="chT"></canvas>
+    </div>
+    <div class="card" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div><h3>Humidity</h3><canvas id="chH"></canvas></div>
+      <div><h3>Wind / vibration proxy</h3><canvas id="chG"></canvas></div>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="card">
+      <h3>Location &amp; route corridor</h3>
+      <div id="map"></div>
+      <div class="row" style="margin-top:8px">
+        <button id="autoLoc" title="Browser geolocation (needs internet)">📍 Auto location</button>
+        <button id="pickStart">Set start on map</button>
+        <button id="pickDest">Set destination</button>
+      </div>
+      <div class="row">
+        <input id="inLat" class="in" placeholder="lat" inputmode="decimal">
+        <input id="inLon" class="in" placeholder="lon" inputmode="decimal">
+        <button id="setManual">Set location</button>
+        <button id="demoRoute">Demo: Namche → Tengboche</button>
+      </div>
+      <div class="row">
+        <button id="buildCorr">Build route corridor (5 pts)</button>
+        <label class="sw"><input type="checkbox" id="gpsSim" checked> GPS signal</label>
+        <span id="corrStatus" class="poschip">no corridor — single-point forecast</span>
+      </div>
+      <div class="row">
+        <span id="posStatus" class="poschip">position: —</span>
+        <span id="uncStatus" class="poschip"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Device state</h3>
+      <div class="row" style="justify-content:space-between"><span>Alert level</span><span id="stateLevel" class="lvlchip lv-clear">Clear</span></div>
+      <div class="stats" style="margin-top:8px">
+        <div class="stat"><div class="k">Pressure residual</div><div class="v" id="residLbl">—</div></div>
+        <div class="stat"><div class="k">Tendency obs / dev</div><div class="v" id="rateLbl">—</div></div>
+        <div class="stat"><div class="k">Altitude (rate)</div><div class="v" id="altLbl">—</div></div>
+        <div class="stat"><div class="k">Climb explains fall</div><div class="v" id="climbLbl">—</div></div>
+        <div class="stat"><div class="k">Confidence</div><div class="v" id="conf">—</div></div>
+        <div class="stat"><div class="k">Battery</div><div class="v">92%</div></div>
+      </div>
+    </div>
+
+    <div class="card controls">
+      <h3>Controls</h3>
+      <div class="row">
+        <button id="modeSim">Live scenarios</button>
+        <button id="modeReplay">Historical replay</button>
+      </div>
+      <div class="row">
+        <select id="scenario">
+          <option value="front">Approaching fast front (storm)</option>
+          <option value="thunder">Thunderstorm buildup</option>
+          <option value="whiteout">Whiteout (wind + cold + moisture)</option>
+          <option value="cold">Cold snap</option>
+          <option value="climb">Aggressive climb (false-alarm test)</option>
+          <option value="quiet">Calm day (false-alarm test)</option>
+        </select>
+        <select id="scale">
+          <option value="60">60× speed</option>
+          <option value="600" selected>600× speed</option>
+          <option value="3600">3600× speed</option>
+        </select>
+        <select id="sens">
+          <option value="low">Sensitivity: low</option>
+          <option value="normal" selected>Sensitivity: normal</option>
+          <option value="high">Sensitivity: high</option>
+        </select>
+      </div>
+      <div class="row">
+        <button id="play">Pause</button>
+        <button id="reset">Reset</button>
+        <label class="sw"><input type="checkbox" id="conn" checked> internet connected</label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Event log (data logger, blueprint 7.2)</h3>
+      <div id="log" class="log"></div>
+    </div>
+  </div>
+</div>
+
+<footer>
+  v0.3 prototype of the Blueprint v0.1 concept. Alert logic is rule-based and transparent (engine.js).
+  This is a decision aid under development — it does not guarantee safety and never replaces official warnings or guide judgment.
+  Replay mode compares model-grid values with ERA5-Land observations; residuals there include model differences, not only forecast error.
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="engine.js"></script>
+<script src="corridor.js"></script>
+<script src="traveler.js"></script>
+<script>
+  window.addEventListener('error', function (e) {
+    var b = document.getElementById('banner');
+    if (b) { b.textContent = 'JS ERROR: ' + e.message + ' @ ' + (e.filename || 'inline') + ':' + e.lineno; b.className = 'banner lv-danger'; }
+  });
+</script>
+<script src="app.js"></script>
+</body>
+</html>
